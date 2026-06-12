@@ -1,0 +1,94 @@
+<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">Google Search Consoleの非表示ツールを使うべきかどうかをYes/Noで判定する対話型診断</h2>
+<div id="quiz" style="border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1.5rem 1.25rem; background: var(--color-background-primary);"></div>
+<script>
+const nodes = {
+  q1: { q: "非表示にしたいURLは、あなたがSearch Consoleで所有（確認済み）しているプロパティのものですか？", yes: "q2", no: "q1b" },
+  q1b: { q: "そのページから、消したいコンテンツはすでに削除・更新されていますか？", yes: "r_outdated", no: "r_legal" },
+  q2: { q: "消したい範囲は「Google検索の結果」だけですか？（他の検索エンジンやインターネット全体ではない）", yes: "q3", no: "r_scope" },
+  q3: { q: "目的は次のいずれかに当てはまりますか？\n・重複URLの整理（正しいバージョンだけ残したい）\n・サイト移転・URL変更\n・手動対策やドメイン購入後の「ゼロから再スタート」\n・Search Consoleのクロールエラー対応\n・すでに404になった古いページの掃除（急ぎではない）", yes: "r_wrongtool", no: "q4" },
+  q4: { q: "ページ自体は検索結果に残してよく、機密情報などを含む「古い説明文（スニペット）」だけを早く消したいですか？（ページは更新済み）", yes: "r_snippet", no: "q5" },
+  q5: { q: "そのURLを「速やかに」（自然なクロールを待たずに）検索結果から消す必要がありますか？", yes: "q6", no: "r_wait" },
+  q6: { q: "6か月を超えて、完全に検索結果から消したいですか？", yes: "r_permanent", no: "r_temp" },
+
+  r_outdated: { verdict: "no", title: "このツールは使えません → 「古いコンテンツの更新ツール」へ", body: "所有していないサイトで、コンテンツがすでに削除済みの場合は、誰でも使える「古いコンテンツの更新ツール」で検索結果の更新をリクエストします。", link: "https://search.google.com/search-console/remove-outdated-content", linkLabel: "該当ツールを開く" },
+  r_legal: { verdict: "no", title: "このツールは使えません → ウェブサイトの所有者に削除依頼してください", body: "但しポリシー違反や法的な問題がある場合などは、専用のフォームから削除リクエストできます。", link: "https://support.google.com/websearch/troubleshooter/3111061", linkLabel: "該当ページを開く" },
+  r_scope: { verdict: "no", title: "このツールでは目的を達成できません", body: "非表示ツールが効くのはGoogle検索の結果のみです。他の検索エンジンやWeb全体から消すには、サーバー上でコンテンツ自体を削除するか、パスワード保護などでアクセスを遮断する必要があります。" },
+  r_wrongtool: { verdict: "no", title: "使うべきでないケースです → 正しい方法へ", body: "・重複URLの整理 → canonical等の正規化（ツールを使うと全バージョンが消える恐れ）\n・サイト移転 → 「URL変更を伴うサイト移転」の手順\n・ゼロから再スタート → 再審査リクエスト\n・クロールエラー / 404済みの古いページ → 何もしなくても次回クロール時に自然に消えます" },
+  r_snippet: { verdict: "yes", title: "使うべきケースです → 「検索結果のスニペットを消去する」", body: "ページ更新後の変更を検索結果に早く反映させたい場合に該当します。非表示ツールで「検索結果のスニペットを消去する」を選択。URLは拡張子・パラメータ含め完全一致が必要です。" },
+  r_wait: { verdict: "maybe", title: "ツールは不要です", body: "緊急性がなければ、404/410を返すかnoindexを設定して、次回クロールでの自然な反映を待てば十分です。手動リクエストの必要はありません。" },
+  r_temp: { verdict: "yes", title: "使うべきケースです → 「URLを一時的に非表示にする」", body: "約6か月間、Google検索結果からブロックされます（クロール自体は止まりません）。同じページを指す別URL（大文字小文字違い・パラメータ付き等）があれば、それぞれリクエストが必要です。" },
+  r_permanent: { verdict: "yes", title: "使うべきケースです（ただし第一歩として）", body: "非表示ツール単体では約6か月で再表示されます。ツールでブロックしたうえで、恒久対応を必ず併用してください。\n・404/410を返す、またはパスワード保護\n・noindexメタタグ（robots.txtでのブロックはNG）\n恒久対応より先にブロックした場合は、一度解除して再ブロックするとインデックスから消去されます。" }
+};
+
+let current = "q1";
+let history = [];
+const box = document.getElementById("quiz");
+
+function render() {
+  const n = nodes[current];
+  box.innerHTML = "";
+  if (n.q) {
+    const step = document.createElement("p");
+    step.style.cssText = "font-size:13px;color:var(--color-text-tertiary);margin:0 0 8px;";
+    step.textContent = "質問 " + (history.length + 1);
+    box.appendChild(step);
+    const q = document.createElement("p");
+    q.style.cssText = "font-size:16px;font-weight:500;line-height:1.7;margin:0 0 1.25rem;white-space:pre-line;";
+    q.textContent = n.q;
+    box.appendChild(q);
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:12px;flex-wrap:wrap;";
+    const mk = (label, next, icon) => {
+      const b = document.createElement("button");
+      b.innerHTML = '<i class="ti ' + icon + '" aria-hidden="true" style="font-size:16px;vertical-align:-2px;margin-right:6px;"></i>' + label;
+      b.style.cssText = "min-width:120px;";
+      b.onclick = () => { history.push(current); current = next; render(); };
+      return b;
+    };
+    row.appendChild(mk("はい", n.yes, "ti-check"));
+    row.appendChild(mk("いいえ", n.no, "ti-x"));
+    box.appendChild(row);
+  } else {
+    const colors = { yes: ["#E1F5EE", "#085041", "#0F6E56", "ti-circle-check", "使うべき"], no: ["#FCEBEB", "#791F1F", "#A32D2D", "ti-ban", "使うべきでない"], maybe: ["#FAEEDA", "#633806", "#854F0B", "ti-clock", "不要（待てばOK）"] };
+    const darkColors = { yes: ["#085041", "#9FE1CB", "#5DCAA5"], no: ["#791F1F", "#F7C1C1", "#F09595"], maybe: ["#633806", "#FAC775", "#EF9F27"] };
+    const dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const c = colors[n.verdict];
+    const fill = dark ? darkColors[n.verdict][0] : c[0];
+    const titleC = dark ? darkColors[n.verdict][1] : c[1];
+    const badge = document.createElement("div");
+    badge.style.cssText = "display:inline-block;background:" + fill + ";color:" + titleC + ";font-size:13px;font-weight:500;padding:4px 12px;border-radius:var(--border-radius-md);margin-bottom:12px;";
+    badge.innerHTML = '<i class="ti ' + c[3] + '" aria-hidden="true" style="font-size:14px;vertical-align:-2px;margin-right:4px;"></i>判定: ' + c[4];
+    box.appendChild(badge);
+    const t = document.createElement("p");
+    t.style.cssText = "font-size:18px;font-weight:500;margin:0 0 8px;line-height:1.6;";
+    t.textContent = n.title;
+    box.appendChild(t);
+    const b = document.createElement("p");
+    b.style.cssText = "font-size:15px;color:var(--color-text-secondary);line-height:1.8;margin:0 0 1.25rem;white-space:pre-line;";
+    b.textContent = n.body;
+    box.appendChild(b);
+    if (n.link) {
+      const a = document.createElement("a");
+      a.href = n.link;
+      a.textContent = n.linkLabel || "該当ツールを開く";
+      a.style.cssText = "font-size:14px;color:var(--color-text-info);display:inline-block;margin-bottom:1.25rem;";
+      box.appendChild(a);
+    }
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:12px;";
+    const re = document.createElement("button");
+    re.innerHTML = '<i class="ti ti-refresh" aria-hidden="true" style="font-size:16px;vertical-align:-2px;margin-right:6px;"></i>最初からやり直す';
+    re.onclick = () => { history = []; current = "q1"; render(); };
+    row.appendChild(re);
+    box.appendChild(row);
+  }
+  if (history.length > 0 && nodes[current].q) {
+    const back = document.createElement("button");
+    back.innerHTML = '<i class="ti ti-arrow-left" aria-hidden="true" style="font-size:14px;vertical-align:-2px;margin-right:4px;"></i>戻る';
+    back.style.cssText = "margin-top:1.25rem;font-size:13px;";
+    back.onclick = () => { current = history.pop(); render(); };
+    box.appendChild(back);
+  }
+}
+render();
+</script>
